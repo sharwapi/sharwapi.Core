@@ -10,7 +10,7 @@
 
 SharwAPI (also known as Sharw's API) is a modular API framework built on .NET. It is lightweight, high-performance, extensible, and easy to use.
 
-**[Documentation](https://sharwapi.hope-now.top)** | **[Download](https://github.com/sharwapi/sharwapi.core/releases)** | 🧩 **[Plugin Market](https://sharwapi.hope-now.top/market)**
+**[Documentation](https://sharwapi.hope-now.top)** | **[Download](https://github.com/sharwapi/sharwapi.core/releases)** | **[Plugin Market](https://sharwapi-market.hope-now.top)**
 
 ## Features
 
