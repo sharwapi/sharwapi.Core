@@ -1,66 +1,132 @@
 using Microsoft.AspNetCore.Diagnostics;
 using sharwapi.Contracts.Core;
+using sharwapi.Core;
 using System.Reflection;
 using Microsoft.OpenApi.Models;
+using Serilog;
+using Serilog.Extensions.Logging;
 
-// ÓÃÓÚ¼ÇÂ¼·şÎñÆô¶¯Ê±µÄÔËĞĞÊ±³¤£¨uptime£©
+// ç”¨äºè®°å½•æœåŠ¡å¯åŠ¨æ—¶çš„è¿è¡Œæ—¶é•¿ï¼ˆuptimeï¼‰
 var startTime = DateTime.UtcNow;
 
-// ´´½¨ WebApplicationBuilder£¨Ó¦ÓÃÓë·şÎñÅäÖÃÈë¿Ú£©
+// æ„å»ºé…ç½®ä»¥åˆå§‹åŒ– Serilog
+var configuration = new ConfigurationBuilder()
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .Build();
+
+// åˆå§‹åŒ–å…¨å±€ Logger
+sharwapi.Core.Logger.Initialize(configuration);
+Log.Information("Starting web host");
+
+// åˆ›å»º WebApplicationBuilderï¼ˆåº”ç”¨ä¸æœåŠ¡é…ç½®å…¥å£ï¼‰
 var builder = WebApplication.CreateBuilder(args);
+
+// å°† Serilog æŒ‚è½½åˆ° Hostï¼Œæ¥ç®¡ç³»ç»Ÿæ—¥å¿—
+builder.Host.UseSerilog();
 
 builder.Services.Configure<HostOptions>(opts =>
 {
     opts.ShutdownTimeout = TimeSpan.FromSeconds(30);
 });
 
-// ÔÚÆô¶¯½×¶Î´´½¨Ò»¸öÁÙÊ±µÄ LoggerFactory£¬ÓÃÓÚ¼ÇÂ¼²å¼ş¼ÓÔØ½×¶ÎµÄÈÕÖ¾
-using var bootstrapLoggerFactory = LoggerFactory.Create(b =>
-{
-    b.AddConsole();
-}); 
-var pluginLoaderLogger = bootstrapLoggerFactory.CreateLogger("PluginLoader");
+// åˆ›å»ºç”¨äºæ’ä»¶åŠ è½½å™¨çš„ Logger (ä½¿ç”¨ SerilogLoggerFactory æ¡¥æ¥)
+var pluginLoaderLogger = new SerilogLoggerFactory(Log.Logger).CreateLogger("PluginLoader");
 
-// ´ÓÅäÖÃÖĞ¶ÁÈ¡ API ĞÅÏ¢£¨Ãû³ÆÓë°æ±¾£©£¬ÈôÎ´ÅäÖÃÔòÊ¹ÓÃÄ¬ÈÏÖµ
+// ä»é…ç½®ä¸­è¯»å– API ä¿¡æ¯ï¼ˆåç§°ä¸ç‰ˆæœ¬ï¼‰ï¼Œè‹¥æœªé…ç½®åˆ™ä½¿ç”¨é»˜è®¤å€¼
 var apiName = builder.Configuration.GetValue<string>("ApiInfo:Name") ?? "CoreAPI";
 var apiVersion = builder.Configuration.GetValue<string>("ApiInfo:Version") ?? "0.0.0";
 
-// ¼ÓÔØÎ»ÓÚÔËĞĞÄ¿Â¼ÏÂ Plugins ×ÓÄ¿Â¼µÄ²å¼ş£¨DLL£©
+// åŠ è½½ä½äºè¿è¡Œç›®å½•ä¸‹ Plugins å­ç›®å½•çš„æ’ä»¶ï¼ˆDLLï¼‰
 var plugins = LoadPlugins(builder.Configuration, pluginLoaderLogger);
 
-// ½«²å¼ş¼¯ºÏ×¢Èëµ½ DI ÈİÆ÷£¨×÷Îªµ¥Àı£©£¬²å¼şÊµÏÖ¿É´ÓÈİÆ÷ÖĞ»ñÈ¡´Ë¼¯ºÏ
+// å°†æ’ä»¶é›†åˆæ³¨å…¥åˆ° DI å®¹å™¨ï¼ˆä½œä¸ºå•ä¾‹ï¼‰ï¼Œæ’ä»¶å®ç°å¯ä»å®¹å™¨ä¸­è·å–æ­¤é›†åˆ
 builder.Services.AddSingleton(plugins);
 
-// ÈÃÃ¿¸ö²å¼şÏò DI ÈİÆ÷×¢²áËüÃÇ×Ô¼ºµÄ·şÎñ
+// è®©æ¯ä¸ªæ’ä»¶å‘ DI å®¹å™¨æ³¨å†Œå®ƒä»¬è‡ªå·±çš„æœåŠ¡
 pluginLoaderLogger.LogInformation("Registering plugin services...");
 foreach (var plugin in plugins)
 {
-    plugin.RegisterServices(builder.Services, builder.Configuration);
+    // å®ç°é…ç½®éš”ç¦»ï¼šä¸ºæ¯ä¸ªæ’ä»¶åŠ è½½ç‹¬ç«‹çš„é…ç½®æ–‡ä»¶
+    // è·¯å¾„æ ¼å¼ï¼šconfig/{PluginName}.json
+    var configPath = Path.Combine(AppContext.BaseDirectory, "config", $"{plugin.Name}.json");
+    
+    // æ£€æŸ¥å½“å‰æ’ä»¶çš„é…ç½®æ–‡ä»¶æ˜¯å¦å­˜åœ¨äºæŒ‡å®šè·¯å¾„
+    if (!File.Exists(configPath))
+    {
+        // å°è¯•ä»æ’ä»¶å®ä¾‹ä¸­è·å–é»˜è®¤é…ç½®å¯¹è±¡
+        var defaultConfig = plugin.DefaultConfig;
+
+        // å¦‚æœæ’ä»¶æä¾›äº†éç©ºçš„é»˜è®¤é…ç½®å¯¹è±¡
+        if (defaultConfig != null)
+        {
+            try
+            {
+                // è·å–é…ç½®æ–‡ä»¶æ‰€åœ¨çš„ç›®å½•è·¯å¾„
+                var configDir = Path.GetDirectoryName(configPath);
+
+                // æ£€æŸ¥ç›®å½•è·¯å¾„æ˜¯å¦æœ‰æ•ˆä¸”ç›®å½•æ˜¯å¦å­˜åœ¨ï¼Œè‹¥ä¸å­˜åœ¨åˆ™åˆ›å»º
+                if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
+                {
+                    // åˆ›å»ºé…ç½®æ–‡ä»¶çš„çˆ¶ç›®å½•
+                    Directory.CreateDirectory(configDir);
+                }
+
+                // é…ç½® JSON åºåˆ—åŒ–é€‰é¡¹ï¼Œè®¾ç½®ä¸ºç¼©è¿›æ ¼å¼ä»¥æé«˜å¯è¯»æ€§
+                var jsonOptions = new System.Text.Json.JsonSerializerOptions
+                {
+                    WriteIndented = true
+                };
+
+                // å°†é»˜è®¤é…ç½®å¯¹è±¡åºåˆ—åŒ–ä¸º JSON å­—ç¬¦ä¸²
+                var jsonString = System.Text.Json.JsonSerializer.Serialize(defaultConfig, jsonOptions);
+
+                // å°†åºåˆ—åŒ–åçš„ JSON å­—ç¬¦ä¸²å†™å…¥åˆ°é…ç½®æ–‡ä»¶è·¯å¾„
+                File.WriteAllText(configPath, jsonString);
+                
+                // è®°å½•æ—¥å¿—ï¼Œè¡¨æ˜å·²æˆåŠŸç”Ÿæˆé»˜è®¤é…ç½®æ–‡ä»¶
+                pluginLoaderLogger.LogInformation("Generated default configuration for plugin {PluginName} at {ConfigPath}", plugin.Name, configPath);
+            }
+            catch (Exception ex)
+            {
+                // æ•è·å¹¶è®°å½•åœ¨ç”Ÿæˆé»˜è®¤é…ç½®æ–‡ä»¶è¿‡ç¨‹ä¸­å‘ç”Ÿçš„ä»»ä½•å¼‚å¸¸
+                pluginLoaderLogger.LogError(ex, "Failed to generate default configuration for plugin {PluginName}", plugin.Name);
+            }
+        }
+    }
+
+    // æ„å»ºæ’ä»¶ä¸“ç”¨çš„ Configuration å¯¹è±¡
+    var pluginConfig = new ConfigurationBuilder()
+        .AddJsonFile(configPath, optional: true, reloadOnChange: true)
+        .Build();
+
+    // å°†ç‹¬ç«‹çš„é…ç½®å¯¹è±¡ä¼ é€’ç»™æ’ä»¶çš„æœåŠ¡æ³¨å†Œæ–¹æ³•
+    plugin.RegisterServices(builder.Services, pluginConfig);
 }
 
-// Ìí¼Ó»ù±¾µÄ OpenAPI/Swagger Ö§³Ö
+// æ·»åŠ åŸºæœ¬çš„ OpenAPI/Swagger æ”¯æŒ
 builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddSwaggerGen(options =>
 {
-    // »ù±¾µÄ Swagger ÎÄµµĞÅÏ¢
+    // åŸºæœ¬çš„ Swagger æ–‡æ¡£ä¿¡æ¯
     options.SwaggerDoc("v1", new OpenApiInfo
     {
         Title = apiName,
         Version = apiVersion,
-        Description = "Ò»¸öÓÉ²å¼ş¶¯Ì¬¹¹½¨µÄ API"
+        Description = "ä¸€ä¸ªç”±æ’ä»¶åŠ¨æ€æ„å»ºçš„ API"
     });
 
-    // Ìí¼Ó×Ô¶¨ÒåµÄ ApiKey °²È«¶¨Òå£¨Í·²¿ X-Api-Token£©¹©²å¼şÊ¹ÓÃÊÜ±£»¤Â·ÓÉ
+    // æ·»åŠ è‡ªå®šä¹‰çš„ ApiKey å®‰å…¨å®šä¹‰ï¼ˆå¤´éƒ¨ X-Api-Tokenï¼‰ä¾›æ’ä»¶ä½¿ç”¨å—ä¿æŠ¤è·¯ç”±
     options.AddSecurityDefinition("ApiKeyAuth", new OpenApiSecurityScheme
     {
         Name = "X-Api-Token",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.ApiKey,
-        Description = "ÓÃÓÚ·ÃÎÊÊÜ±£»¤Â·ÓÉµÄ API ÁîÅÆ"
+        Description = "ç”¨äºè®¿é—®å—ä¿æŠ¤è·¯ç”±çš„ API ä»¤ç‰Œ"
     });
 
-    // ½«¶¨ÒåÓ¦ÓÃµ½È«¾Ö£¨´Ë´¦²»Ö¸¶¨ÌØ¶¨·¶Î§£©
+    // å°†å®šä¹‰åº”ç”¨åˆ°å…¨å±€ï¼ˆæ­¤å¤„ä¸æŒ‡å®šç‰¹å®šèŒƒå›´ï¼‰
     options.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
@@ -77,10 +143,10 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
-// ¹¹½¨ WebApplication ÊµÀı£¨´ËÊ±·şÎñÒÑ×¢²á£©
+// æ„å»º WebApplication å®ä¾‹ï¼ˆæ­¤æ—¶æœåŠ¡å·²æ³¨å†Œï¼‰
 var app = builder.Build();
 
-// È«¾ÖÒì³£´¦Àí£º²¶»ñÎ´´¦ÀíÒì³£²¢·µ»ØÍ³Ò»µÄ JSON ÏìÓ¦
+// å…¨å±€å¼‚å¸¸å¤„ç†ï¼šæ•è·æœªå¤„ç†å¼‚å¸¸å¹¶è¿”å›ç»Ÿä¸€çš„ JSON å“åº”
 app.UseExceptionHandler(exceptionHandlerApp =>
 {
     exceptionHandlerApp.Run(async context =>
@@ -89,14 +155,14 @@ app.UseExceptionHandler(exceptionHandlerApp =>
         context.Response.ContentType = "application/json";
         var exceptionDetails = context.Features.Get<IExceptionHandlerFeature>();
         var exception = exceptionDetails?.Error;
-        // ¼ÇÂ¼Òì³££¨ÔÚÈÕÖ¾ÖĞ°üº¬·¢ÉúÂ·¾¶£©
+        // è®°å½•å¼‚å¸¸ï¼ˆåœ¨æ—¥å¿—ä¸­åŒ…å«å‘ç”Ÿè·¯å¾„ï¼‰
         app.Logger.LogError(exception, "Unhandled exception caught by global handler at {Path}", exceptionDetails?.Path);
         var response = new
         {
             StatusCode = context.Response.StatusCode,
             Message = "An unexpected internal server error has occurred.",
 
-            // ÔÚ¿ª·¢»·¾³ÖĞ·µ»ØÏêÏ¸ĞÅÏ¢£¬·ñÔò²»Ğ¹Â¶ÄÚ²¿Òì³£ÏûÏ¢
+            // åœ¨å¼€å‘ç¯å¢ƒä¸­è¿”å›è¯¦ç»†ä¿¡æ¯ï¼Œå¦åˆ™ä¸æ³„éœ²å†…éƒ¨å¼‚å¸¸æ¶ˆæ¯
             Details = app.Environment.IsDevelopment() ? exception?.Message : null,
             Path = exceptionDetails?.Path
         };
@@ -104,7 +170,7 @@ app.UseExceptionHandler(exceptionHandlerApp =>
     });
 });
 
-// ÔÚ¿ª·¢»·¾³ÖĞÆôÓÃ Swagger UI£¬±ãÓÚµ÷ÊÔÓë²é¿´ÎÄµµ
+// åœ¨å¼€å‘ç¯å¢ƒä¸­å¯ç”¨ Swagger UIï¼Œä¾¿äºè°ƒè¯•ä¸æŸ¥çœ‹æ–‡æ¡£
 if (app.Environment.IsDevelopment())
 {
     app.Logger.LogInformation("Enabling Swagger UI (Development Mode)...");
@@ -112,37 +178,58 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(options =>
     {
         options.SwaggerEndpoint("/swagger/v1/swagger.json", $"{apiName} {apiVersion}");
-        options.RoutePrefix = "swagger"; // ÒÔ /swagger ×÷Îª UI µÄÂ·ÓÉÇ°×º
+        options.RoutePrefix = "swagger"; // ä»¥ /swagger ä½œä¸º UI çš„è·¯ç”±å‰ç¼€
     });
 }
 
-// ÈÃÃ¿¸ö²å¼şÓĞ»ú»áÔÚÇëÇó¹ÜµÀÖĞ×¢²áÖĞ¼ä¼ş
+// è®©æ¯ä¸ªæ’ä»¶æœ‰æœºä¼šåœ¨è¯·æ±‚ç®¡é“ä¸­æ³¨å†Œä¸­é—´ä»¶
 app.Logger.LogInformation("Configuring plugin middleware...");
 foreach (var plugin in plugins)
 {
     plugin.Configure(app);
 }
 
-// ÈÃÃ¿¸ö²å¼ş×¢²áËüÃÇ×ÔÉíµÄÂ·ÓÉÓë¶Ëµã
+// è®©æ¯ä¸ªæ’ä»¶æ³¨å†Œå®ƒä»¬è‡ªèº«çš„è·¯ç”±ä¸ç«¯ç‚¹
 app.Logger.LogInformation("Registering plugin routes...");
 foreach (var plugin in plugins)
 {
-    plugin.RegisterRoutes(app, app.Configuration);
+    // æ£€æŸ¥æ˜¯å¦å¯ç”¨è‡ªåŠ¨è·¯ç”±å‰ç¼€
+    IEndpointRouteBuilder routeBuilder = app;
+    if (plugin.UseAutoRoutePrefix)
+    {
+        // å¦‚æœå¯ç”¨ï¼Œåˆ›å»ºä¸€ä¸ªå¸¦å‰ç¼€çš„è·¯ç”±ç»„
+        // å‰ç¼€æ ¼å¼ï¼š/{plugin.Name}
+        routeBuilder = app.MapGroup($"/{plugin.Name}");
+    }
+
+    // å°†ï¼ˆå¯èƒ½æ˜¯åˆ†ç»„çš„ï¼‰è·¯ç”±æ„å»ºå™¨ä¼ é€’ç»™æ’ä»¶
+    plugin.RegisterRoutes(routeBuilder, app.Configuration);
     app.Logger.LogInformation("Loaded Plugin: {PluginName} v{PluginVersion}", plugin.Name, plugin.Version);
 }
 
-// ¸ùÂ·¾¶£ºÏÔÊ¾ API Ãû³Æ¡¢°æ±¾ÓëÒÑÔËĞĞÊ±³¤
+// æ ¹è·¯å¾„ï¼šæ˜¾ç¤º API åç§°ã€ç‰ˆæœ¬ä¸å·²è¿è¡Œæ—¶é•¿
 app.MapGet("/", () =>
 {
     var uptime = DateTime.UtcNow - startTime;
     return new { apiName, version = apiVersion, runningTime = uptime, message = "Core API running." };
 });
 
-// Æô¶¯²¢¼àÌıÇëÇó
-app.Run();
+// å¯åŠ¨å¹¶ç›‘å¬è¯·æ±‚
+try
+{
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Host terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
 
-// ´Ó Plugins Ä¿Â¼¼ÓÔØÊµÏÖÁË IApiPlugin µÄÀàĞÍ²¢·µ»ØÆäÊµÀı¼¯ºÏ
-List<IApiPlugin> LoadPlugins(IConfiguration configuration, ILogger logger)
+// ä» Plugins ç›®å½•åŠ è½½å®ç°äº† IApiPlugin çš„ç±»å‹å¹¶è¿”å›å…¶å®ä¾‹é›†åˆ
+List<IApiPlugin> LoadPlugins(IConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger)
 {
     var loadedPlugins = new List<IApiPlugin>();
     string pluginsPath = Path.Combine(AppContext.BaseDirectory, "Plugins");
@@ -156,7 +243,7 @@ List<IApiPlugin> LoadPlugins(IConfiguration configuration, ILogger logger)
         }
         catch (Exception ex)
         {
-            // ÎŞ·¨´´½¨Ä¿Â¼Ê±¼ÇÂ¼´íÎó²¢·µ»Ø¿Õ²å¼şÁĞ±í
+            // æ— æ³•åˆ›å»ºç›®å½•æ—¶è®°å½•é”™è¯¯å¹¶è¿”å›ç©ºæ’ä»¶åˆ—è¡¨
             logger.LogError(ex, "Failed to create plugins directory at {PluginsPath}", pluginsPath);
             return loadedPlugins;
         }
@@ -167,8 +254,11 @@ List<IApiPlugin> LoadPlugins(IConfiguration configuration, ILogger logger)
     {
         try
         {
-            // ÒÔ¼òµ¥·½Ê½¼ÓÔØ²å¼ş³ÌĞò¼¯²¢²éÕÒÊµÏÖ IApiPlugin µÄÀàĞÍ
-            var assembly = Assembly.LoadFrom(dllPath);
+            // ä½¿ç”¨è‡ªå®šä¹‰çš„ PluginLoadContext åŠ è½½æ’ä»¶ç¨‹åºé›†ï¼Œå®ç°éš”ç¦»
+            // æ¯ä¸ªæ’ä»¶ä½¿ç”¨å•ç‹¬çš„ LoadContextï¼Œç¡®ä¿ä¾èµ–éš”ç¦»
+            var loadContext = new PluginLoadContext(dllPath);
+            var assembly = loadContext.LoadFromAssemblyPath(dllPath);
+            
             var pluginTypes = assembly.GetTypes()
                 .Where(t => typeof(IApiPlugin).IsAssignableFrom(t) && !t.IsInterface);
 
@@ -182,7 +272,7 @@ List<IApiPlugin> LoadPlugins(IConfiguration configuration, ILogger logger)
         }
         catch (Exception ex)
         {
-            // ²å¼ş¼ÓÔØÊ§°ÜÊ±¼ÇÂ¼´íÎó²¢¼ÌĞø¼ÓÔØÆäËû²å¼ş
+            // æ’ä»¶åŠ è½½å¤±è´¥æ—¶è®°å½•é”™è¯¯å¹¶ç»§ç»­åŠ è½½å…¶ä»–æ’ä»¶
             logger.LogError(ex, "Error loading plugin from {DllPath}", dllPath);
         }
     }
