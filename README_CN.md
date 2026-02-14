@@ -27,7 +27,7 @@ SharwAPI (又称Sharw's API) 是一款基于.NET开发的模块化API框架，�
 - **CPU**：1 核或更高
 - **内存**：512M 或更高
 - **硬盘**：5GB 可用空间
-- **运行时**：[ASP.NET Core 10 Runtime](https://dotnet.microsoft.com/zh-cn/download/dotnet/10.0)
+- **运行时**：从 Releases 下载的程序无需安装 .NET Runtime（程序已内置）
 
 你可以在 [Github Releases](https://github.com/sharwapi/sharwapi.core/releases) 中下载软件并运行。
 
