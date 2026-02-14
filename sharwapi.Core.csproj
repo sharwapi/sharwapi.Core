@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>4cd6e719-cb4f-4dbe-8f8a-5aef3154b923</UserSecretsId>
@@ -17,7 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\sharwapi.Contracts.Core\sharwapi.Contracts.Core.csproj" />
+    <PackageReference Include="sharwapi.Contracts.Core" Version="0.2.*" />
   </ItemGroup>
 
 </Project>

@@ -197,9 +197,29 @@ foreach (var plugin in plugins)
     IEndpointRouteBuilder routeBuilder = app;
     if (plugin.UseAutoRoutePrefix)
     {
+        // 默认使用插件名称作为前缀
+        string routePrefix = plugin.Name;
+
+        // 尝试从配置中读取重写值 (配置节: RouteOverride:插件名)
+        var overrideRoute = app.Configuration.GetValue<string>($"RouteOverride:{plugin.Name}");
+        if (!string.IsNullOrEmpty(overrideRoute))
+        {
+            // 验证重写值只包含字母和数字
+            if (System.Text.RegularExpressions.Regex.IsMatch(overrideRoute, "^[a-zA-Z0-9]+$"))
+            {
+                routePrefix = overrideRoute;
+                app.Logger.LogInformation("Route prefix for plugin '{PluginName}' overridden to '{RoutePrefix}'", plugin.Name, routePrefix);
+            }
+            else
+            {
+                // 无效重写值，回退到插件名作为路由前缀
+                app.Logger.LogWarning("Invalid route override '{OverrideRoute}' for plugin '{PluginName}'. Only alphanumeric characters (A-Z, a-z, 0-9) are allowed. Falling back to default.", overrideRoute, plugin.Name);
+            }
+        }
+
         // 如果启用，创建一个带前缀的路由组
-        // 前缀格式：/{plugin.Name}
-        routeBuilder = app.MapGroup($"/{plugin.Name}");
+        // 使用 TrimStart('/') 确保路径格式正确
+        routeBuilder = app.MapGroup($"/{routePrefix.TrimStart('/')}");
     }
 
     // 将（可能是分组的）路由构建器传递给插件

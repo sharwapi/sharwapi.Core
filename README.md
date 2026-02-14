@@ -25,9 +25,9 @@ Before you start, please ensure your device meets the following recommended requ
 
 - **OS**: Windows x64 / Linux x64
 - **CPU**: 1 Core or higher
-- **RAM**: 1GB or higher
+- **RAM**: 512M or higher
 - **Disk**: 5GB available space
-- **Runtime**: [ASP.NET Core 9 Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/9.0)
+- **Runtime**: [ASP.NET Core 10 Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
 
 You can download and run the software from [Github Releases](https://github.com/sharwapi/sharwapi.core/releases).
 
