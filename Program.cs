@@ -5,6 +5,7 @@ using System.Reflection;
 using Microsoft.OpenApi.Models;
 using Serilog;
 using Serilog.Extensions.Logging;
+using NuGet.Versioning;
 
 // 用于记录服务启动时的运行时长（uptime）
 var startTime = DateTime.UtcNow;
@@ -39,6 +40,88 @@ var apiVersion = builder.Configuration.GetValue<string>("ApiInfo:Version") ?? "0
 
 // 加载位于运行目录下 Plugins 子目录的插件（DLL）
 var plugins = LoadPlugins(builder.Configuration, pluginLoaderLogger);
+
+// --- 依赖检查逻辑 ---
+pluginLoaderLogger.LogInformation("Checking plugin dependencies...");
+var loadedPluginsMap = plugins.ToDictionary(p => p.Name, p => p.Version);
+var validPlugins = new List<IApiPlugin>();
+foreach (var plugin in plugins)
+{
+    bool dependenciesMet = true;
+    foreach (var dependency in plugin.Dependencies)
+    {
+        string depName = dependency.Key;
+        string depRangeStr = dependency.Value ?? string.Empty;
+
+        // 检查依赖插件是否存在
+        if (!loadedPluginsMap.TryGetValue(depName, out var loadedVersionStr))
+        {
+            pluginLoaderLogger.LogError("Plugin '{PluginName}' failed to load. Missing dependency: '{DepName}'.", plugin.Name, depName);
+            dependenciesMet = false;
+            break;
+        }
+
+        // 解析当前加载的插件版本
+        if (!NuGetVersion.TryParse(loadedVersionStr, out var loadedVersion))
+        {
+            pluginLoaderLogger.LogError("Plugin '{PluginName}' depends on '{DepName}', but the loaded version '{LoadedVer}' of dependency '{DepName}' has an invalid format.", 
+                plugin.Name, depName, loadedVersionStr, depName);
+            dependenciesMet = false;
+            break;
+        }
+
+        // 解析依赖要求的版本范围
+        // VersionRange.Parse 支持 "[1.0, 2.0)", "1.0" (即 >=1.0) 等标准写法
+        bool isRangeValid = VersionRange.TryParse(depRangeStr, out var requiredRange);
+        
+        // 如果解析失败，尝试处理浮动版本 (例如 "1.*")
+        if (!isRangeValid && FloatRange.TryParse(depRangeStr, out var floatRange))
+        {
+            // 检查浮动版本范围
+            if (!floatRange.Satisfies(loadedVersion))
+            {
+                pluginLoaderLogger.LogError("Plugin '{PluginName}' requires '{DepName}' version '{DepRange}' (Floating), but loaded version '{LoadedVer}' is incompatible.", 
+                    plugin.Name, depName, depRangeStr, loadedVersionStr);
+                dependenciesMet = false;
+                break;
+            }
+        }
+        else if (isRangeValid)
+        {
+             // 检查标准版本范围
+             if (!requiredRange.Satisfies(loadedVersion))
+             {
+                 pluginLoaderLogger.LogError("Plugin '{PluginName}' requires '{DepName}' version '{DepRange}', but loaded version '{LoadedVer}' is incompatible.", 
+                     plugin.Name, depName, depRangeStr, loadedVersionStr);
+                 dependenciesMet = false;
+                 break;
+             }
+        }
+        else
+        {
+             // 无法解析的版本要求
+             pluginLoaderLogger.LogError("Plugin '{PluginName}' has an invalid dependency version format for '{DepName}': '{DepRange}'.", 
+                 plugin.Name, depName, depRangeStr);
+             dependenciesMet = false;
+             dependenciesMet = false;
+            break;
+        }
+    }
+
+    if (dependenciesMet)
+    {
+        validPlugins.Add(plugin);
+    }
+}
+
+// 移除未能满足依赖的插件
+if (validPlugins.Count < plugins.Count)
+{
+    var removedCount = plugins.Count - validPlugins.Count;
+    pluginLoaderLogger.LogWarning("{Count} plugins were unloaded due to missing or incompatible dependencies.", removedCount);
+    plugins = validPlugins;
+}
+// --------------------
 
 // 将插件集合注入到 DI 容器（作为单例），插件实现可从容器中获取此集合
 builder.Services.AddSingleton(plugins);
