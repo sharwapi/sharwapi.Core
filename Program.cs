@@ -43,18 +43,23 @@ var plugins = LoadPlugins(builder.Configuration, pluginLoaderLogger);
 
 // --- 依赖检查逻辑 ---
 pluginLoaderLogger.LogInformation("Checking plugin dependencies...");
-var loadedPluginsMap = plugins.ToDictionary(p => p.Name, p => p.Version);
+// 这里需要传递给插件的是所有候选插件的列表(版本), 用于插件自行判断
+var allCandidatePluginsMap = plugins.ToDictionary(p => p.Name, p => p.Version);
 var validPlugins = new List<IApiPlugin>();
+
 foreach (var plugin in plugins)
 {
     bool dependenciesMet = true;
+    
+    // --- 第一阶段：声明式强依赖检查 ---
     foreach (var dependency in plugin.Dependencies)
     {
         string depName = dependency.Key;
         string depRangeStr = dependency.Value ?? string.Empty;
 
         // 检查依赖插件是否存在
-        if (!loadedPluginsMap.TryGetValue(depName, out var loadedVersionStr))
+        // 注意：这里检查的是 candidates 列表，因为所有插件都还没被正式确认加载
+        if (!allCandidatePluginsMap.TryGetValue(depName, out var loadedVersionStr))
         {
             pluginLoaderLogger.LogError("Plugin '{PluginName}' failed to load. Missing dependency: '{DepName}'.", plugin.Name, depName);
             dependenciesMet = false;
@@ -89,7 +94,7 @@ foreach (var plugin in plugins)
         else if (isRangeValid)
         {
              // 检查标准版本范围
-             if (!requiredRange.Satisfies(loadedVersion))
+             if (!requiredRange!.Satisfies(loadedVersion))
              {
                  pluginLoaderLogger.LogError("Plugin '{PluginName}' requires '{DepName}' version '{DepRange}', but loaded version '{LoadedVer}' is incompatible.", 
                      plugin.Name, depName, depRangeStr, loadedVersionStr);
@@ -103,8 +108,26 @@ foreach (var plugin in plugins)
              pluginLoaderLogger.LogError("Plugin '{PluginName}' has an invalid dependency version format for '{DepName}': '{DepRange}'.", 
                  plugin.Name, depName, depRangeStr);
              dependenciesMet = false;
+             break;
+        }
+    }
+
+    // --- 第二阶段：自定义验证逻辑 (可选依赖/高级检查) ---
+    if (dependenciesMet)
+    {
+        try
+        {
+             // 调用插件的 ValidateDependency 方法
+             if (!plugin.ValidateDependency(allCandidatePluginsMap))
+             {
+                 pluginLoaderLogger.LogWarning("Plugin '{PluginName}' rejected loading during validation check.", plugin.Name);
+                 dependenciesMet = false;
+             }
+        }
+        catch (Exception ex)
+        {
+             pluginLoaderLogger.LogError(ex, "Plugin '{PluginName}' threw an exception during dependency validation.", plugin.Name);
              dependenciesMet = false;
-            break;
         }
     }
 
