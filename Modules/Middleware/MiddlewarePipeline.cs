@@ -19,7 +19,14 @@ public static class MiddlewarePipeline
         
         foreach (var plugin in plugins)
         {
-            plugin.Configure(app);
+            try
+            {
+                plugin.Configure(app);
+            }
+            catch (Exception ex)
+            {
+                app.Logger.LogError(ex, "Plugin '{PluginName}' threw an exception during Configure().", plugin.Name);
+            }
         }
     }
 }

@@ -92,9 +92,14 @@ public class PluginServiceRegistrar
 
                     // 将默认配置序列化为 JSON 并写入文件
                     var jsonString = System.Text.Json.JsonSerializer.Serialize(defaultConfig, jsonOptions);
-                    File.WriteAllText(configPath, jsonString);
-                    
-                    _logger.LogInformation("Generated default configuration for plugin {PluginName} at {ConfigPath}", plugin.Name, configPath);
+                    if (TryWriteConfigWithTimeout(configPath, jsonString, TimeSpan.FromSeconds(10)))
+                    {
+                        _logger.LogInformation("Generated default configuration for plugin {PluginName} at {ConfigPath}", plugin.Name, configPath);
+                    }
+                    else
+                    {
+                        _logger.LogError("Timed out while generating default configuration for plugin {PluginName} at {ConfigPath}", plugin.Name, configPath);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -145,5 +150,37 @@ public class PluginServiceRegistrar
                 }
             });
         });
+    }
+    /// <summary>
+    /// 以超时保护写入配置文件，避免启动阶段因 I/O 卡顿而无限阻塞。
+    /// </summary>
+    private static bool TryWriteConfigWithTimeout(string configPath, string jsonContent, TimeSpan timeout)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            var writeTask = WriteConfigAsync(configPath, jsonContent, cts.Token);
+            writeTask.GetAwaiter().GetResult();
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    private static async Task WriteConfigAsync(string configPath, string jsonContent, CancellationToken cancellationToken)
+    {
+        await using var fileStream = new FileStream(
+            configPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 4096,
+            options: FileOptions.Asynchronous | FileOptions.WriteThrough);
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(jsonContent);
+        await fileStream.WriteAsync(bytes, cancellationToken);
+        await fileStream.FlushAsync(cancellationToken);
     }
 }

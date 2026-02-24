@@ -22,7 +22,14 @@ public static class ExceptionHandling
                 var exceptionDetails = context.Features.Get<IExceptionHandlerFeature>();
                 var exception = exceptionDetails?.Error;
                 
-                app.Logger.LogError(exception, "Unhandled exception caught by global handler at {Path}", exceptionDetails?.Path);
+                if (exception != null)
+                {
+                    app.Logger.LogError(exception, "Unhandled exception caught by global handler at {Path}", exceptionDetails?.Path);
+                }
+                else
+                {
+                    app.Logger.LogError("Unhandled exception caught by global handler at {Path}, but exception details were unavailable.", exceptionDetails?.Path);
+                }
                 
                 var response = new
                 {

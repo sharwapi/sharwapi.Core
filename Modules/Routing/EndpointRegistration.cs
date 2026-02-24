@@ -23,13 +23,20 @@ public static class EndpointRegistration
         // 遍历所有已加载的插件，为每个插件注册路由
         foreach (var plugin in plugins)
         {
-            // 解析插件的路由前缀（可能来自配置覆盖）
-            var routeBuilder = RoutePrefixResolver.Resolve(plugin, configuration, app);
-            
-            // 调用插件的路由注册方法
-            plugin.RegisterRoutes(routeBuilder, configuration);
-            
-            app.Logger.LogInformation("Loaded Plugin: {PluginName} v{PluginVersion}", plugin.Name, plugin.Version);
+            try
+            {
+                // 解析插件的路由前缀（可能来自配置覆盖）
+                var routeBuilder = RoutePrefixResolver.Resolve(plugin, configuration, app);
+
+                // 调用插件的路由注册方法
+                plugin.RegisterRoutes(routeBuilder, configuration);
+
+                app.Logger.LogInformation("Loaded Plugin: {PluginName} v{PluginVersion}", plugin.Name, plugin.Version);
+            }
+            catch (Exception ex)
+            {
+                app.Logger.LogError(ex, "Plugin '{PluginName}' threw an exception during RegisterRoutes().", plugin.Name);
+            }
         }
     }
 

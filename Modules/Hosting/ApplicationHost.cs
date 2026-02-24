@@ -115,7 +115,7 @@ public class ApplicationHost
         {
             _app.Run();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Log.Fatal(ex, "Host terminated unexpectedly");
         }
