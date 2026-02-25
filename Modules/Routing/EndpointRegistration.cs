@@ -15,7 +15,7 @@ public static class EndpointRegistration
     /// </summary>
     /// <param name="app">Web 应用程序</param>
     /// <param name="plugins">已加载的插件列表</param>
-    /// <param name="configuration">应用程序配置</param>
+    /// <param name="configuration">应用程序配置（用于解析路由前缀覆盖）</param>
     public static void RegisterPluginRoutes(WebApplication app, List<IApiPlugin> plugins, IConfiguration configuration)
     {
         app.Logger.LogInformation("Registering plugin routes...");
@@ -25,11 +25,17 @@ public static class EndpointRegistration
         {
             try
             {
-                // 解析插件的路由前缀（可能来自配置覆盖）
+                // 解析插件的路由前缀（可能来自配置覆盖，使用全局配置）
                 var routeBuilder = RoutePrefixResolver.Resolve(plugin, configuration, app);
 
-                // 调用插件的路由注册方法
-                plugin.RegisterRoutes(routeBuilder, configuration);
+                // 为插件构建专属配置（来自 config/{插件名}.json）
+                var configPath = Path.Combine(AppContext.BaseDirectory, "config", $"{plugin.Name}.json");
+                var pluginConfig = new ConfigurationBuilder()
+                    .AddJsonFile(configPath, optional: true, reloadOnChange: true)
+                    .Build();
+
+                // 调用插件的路由注册方法，传入插件专属配置
+                plugin.RegisterRoutes(routeBuilder, pluginConfig);
 
                 app.Logger.LogInformation("Loaded Plugin: {PluginName} v{PluginVersion}", plugin.Name, plugin.Version);
             }
