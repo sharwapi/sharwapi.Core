@@ -1,0 +1,45 @@
+name: .NET Core Build
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - rid: linux-x64
+            profile: linux-x64
+          - rid: linux-arm64
+            profile: linux-arm64
+          - rid: win-x64
+            profile: win-x64
+          - rid: win-x86
+            profile: win-x86
+          - rid: win-arm64
+            profile: win-arm64
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+        
+    - name: Restore dependencies
+      run: dotnet restore sharwapi.Core.csproj
+      
+    - name: Publish
+      run: dotnet publish sharwapi.Core.csproj /p:PublishProfile=Properties/PublishProfiles/${{ matrix.profile }}.pubxml --configuration Release --output ./publish/${{ matrix.rid }}
+      
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sharwapi-core-${{ matrix.rid }}
+        path: ./publish/${{ matrix.rid }}
