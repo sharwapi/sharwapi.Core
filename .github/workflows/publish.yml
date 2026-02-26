@@ -1,0 +1,85 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - rid: linux-x64
+            profile: linux-x64
+          - rid: linux-arm64
+            profile: linux-arm64
+          - rid: win-x64
+            profile: win-x64
+          - rid: win-x86
+            profile: win-x86
+          - rid: win-arm64
+            profile: win-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore sharwapi.Core.csproj
+
+      - name: Publish
+        run: dotnet publish sharwapi.Core.csproj /p:PublishProfile=Properties/PublishProfiles/${{ matrix.profile }}.pubxml --configuration Release --output ./publish/${{ matrix.rid }}
+
+      - name: Prepare package content
+        run: |
+          mkdir -p ./package/${{ matrix.rid }}
+
+          if [ -f "./publish/${{ matrix.rid }}/sharwapi.Core" ]; then
+            cp "./publish/${{ matrix.rid }}/sharwapi.Core" "./package/${{ matrix.rid }}/"
+          fi
+
+          if [ -f "./publish/${{ matrix.rid }}/sharwapi.Core.exe" ]; then
+            cp "./publish/${{ matrix.rid }}/sharwapi.Core.exe" "./package/${{ matrix.rid }}/"
+          fi
+
+          if [ ! -f "./publish/${{ matrix.rid }}/appsettings.json" ]; then
+            echo "appsettings.json not found in publish output for ${{ matrix.rid }}"
+            exit 1
+          fi
+          cp "./publish/${{ matrix.rid }}/appsettings.json" "./package/${{ matrix.rid }}/"
+
+      - name: Archive artifact
+        run: tar -czf ${{ matrix.rid }}.tar.gz -C ./package/${{ matrix.rid }} .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: ${{ matrix.rid }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: ./artifacts/*.tar.gz
+          generate_release_notes: true
