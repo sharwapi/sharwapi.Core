@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Serilog;
+using Serilog.Settings.Configuration;
+using System.Reflection;
 
 namespace sharwapi.Core.Modules.Logging;
 
@@ -16,8 +18,13 @@ public static class Logger
     /// <param name="configuration">应用程序配置对象</param>
     public static void Initialize(IConfiguration configuration)
     {
+        var options = new ConfigurationReaderOptions(
+            Assembly.Load("Serilog.Sinks.Console"),
+            Assembly.Load("Serilog.Sinks.Async"),
+            Assembly.Load("Serilog.Sinks.File"));
+
         Log.Logger = new LoggerConfiguration()
-            .ReadFrom.Configuration(configuration)
+            .ReadFrom.Configuration(configuration, options)
             .CreateLogger();
     }
 }
