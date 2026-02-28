@@ -51,6 +51,9 @@ public class PluginServiceRegistrar
         // 确保配置文件存在，如果不存在则从插件的默认配置生成
         EnsurePluginConfigFile(plugin, configPath);
 
+        // 确保插件专属 data 目录存在
+        EnsurePluginDataDirectory(plugin);
+
         // 为插件构建独立的配置对象，支持热重载
         var pluginConfig = new ConfigurationBuilder()
             .AddJsonFile(configPath, optional: true, reloadOnChange: true)
@@ -58,6 +61,26 @@ public class PluginServiceRegistrar
 
         // 调用插件的服务注册方法
         plugin.RegisterServices(_services, pluginConfig);
+    }
+
+    /// <summary>
+    /// 确保插件专属 data 目录存在
+    /// </summary>
+    private void EnsurePluginDataDirectory(IApiPlugin plugin)
+    {
+        var dataDir = plugin.DataDirectory;
+        if (!Directory.Exists(dataDir))
+        {
+            try
+            {
+                Directory.CreateDirectory(dataDir);
+                _logger.LogInformation("Created data directory for plugin {PluginName} at {DataDir}", plugin.Name, dataDir);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create data directory for plugin {PluginName} at {DataDir}", plugin.Name, dataDir);
+            }
+        }
     }
 
     /// <summary>

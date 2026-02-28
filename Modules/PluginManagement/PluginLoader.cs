@@ -6,7 +6,7 @@ namespace sharwapi.Core.Modules.PluginManagement;
 
 /// <summary>
 /// 插件加载器
-/// 负责从 Plugins 目录加载实现了 IApiPlugin 的程序集
+/// 负责从 plugins 目录加载实现了 IApiPlugin 的程序集
 /// </summary>
 public class PluginLoader
 {
@@ -33,7 +33,7 @@ public class PluginLoader
         var loadedPlugins = new List<IApiPlugin>();
         
         // 获取插件目录路径
-        string pluginsPath = Path.Combine(AppContext.BaseDirectory, "Plugins");
+        string pluginsPath = Path.Combine(AppContext.BaseDirectory, "plugins");
 
         // 检查插件目录是否存在，如果不存在则创建
         if (!Directory.Exists(pluginsPath))
@@ -50,7 +50,7 @@ public class PluginLoader
             return loadedPlugins;
         }
 
-        // 遍历 Plugins 目录下的所有 DLL 文件
+        // 遍历 plugins 目录下的所有 DLL 文件
         foreach (var dllPath in Directory.GetFiles(pluginsPath, "*.dll"))
         {
             try
