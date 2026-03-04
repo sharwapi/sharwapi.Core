@@ -28,6 +28,7 @@ public static class RoutePrefixResolver
 
         // 默认使用插件名称作为路由前缀
         string routePrefix = plugin.Name;
+        bool isOverridden = false;
 
         // 检查是否存在路由前缀覆盖配置
         var overrideRoute = configuration.GetValue<string>($"RouteOverride:{plugin.Name}");
@@ -37,6 +38,7 @@ public static class RoutePrefixResolver
             if (System.Text.RegularExpressions.Regex.IsMatch(overrideRoute, "^[a-zA-Z0-9]+$"))
             {
                 routePrefix = overrideRoute;
+                isOverridden = true;
                 app.Logger.LogInformation("Route prefix for plugin '{PluginName}' overridden to '{RoutePrefix}'", plugin.Name, routePrefix);
             }
             else
@@ -45,6 +47,9 @@ public static class RoutePrefixResolver
                 app.Logger.LogWarning("Invalid route override '{OverrideRoute}' for plugin '{PluginName}'. Only alphanumeric characters (A-Z, a-z, 0-9) are allowed. Falling back to default.", overrideRoute, plugin.Name);
             }
         }
+
+        // 通知插件最终解析到的路由前缀
+        plugin.OnRoutePrefixResolved(routePrefix, isOverridden);
 
         // 返回带有前缀的路由组
         return app.MapGroup($"/{routePrefix.TrimStart('/')}");
