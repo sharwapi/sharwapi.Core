@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json.Nodes;
 using sharwapi.Contracts.Core;
+using System.IO;
 
 namespace sharwapi.Core.Modules.Services;
 
@@ -47,7 +49,7 @@ public class PluginServiceRegistrar
     {
         // 构建插件配置文件的完整路径
         var configPath = Path.Combine(AppContext.BaseDirectory, "config", $"{plugin.Name}.json");
-        
+
         // 确保配置文件存在，如果不存在则从插件的默认配置生成
         EnsurePluginConfigFile(plugin, configPath);
 
@@ -84,50 +86,125 @@ public class PluginServiceRegistrar
     }
 
     /// <summary>
-    /// 确保插件配置文件存在
-    /// 如果配置文件不存在，从插件的 DefaultConfig 生成默认配置
+    /// 确保插件配置文件存在并保持与 DefaultConfig 同步
+    /// 如果配置文件不存在，从插件的 DefaultConfig 生成默认配置；
+    /// 如果已存在，则递归合并 DefaultConfig 中缺失的键，保留用户已有的值。
     /// </summary>
     private void EnsurePluginConfigFile(IApiPlugin plugin, string configPath)
     {
-        // 检查配置文件是否已存在
+        // 确保配置目录存在
+        var configDir = Path.GetDirectoryName(configPath);
+        if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
+        {
+            Directory.CreateDirectory(configDir);
+        }
+
+        // 获取插件提供的默认配置
+        // 注意：如果 DefaultConfig 抛出异常，属于插件自身的问题，此处不做 catch
+        var defaultConfig = plugin.DefaultConfig;
+        if (defaultConfig == null) return;
+
+        var jsonOptions = new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = true
+        };
+
         if (!File.Exists(configPath))
         {
-            // 获取插件提供的默认配置
-            var defaultConfig = plugin.DefaultConfig;
-
-            if (defaultConfig != null)
+            // 配置文件不存在，直接写入 DefaultConfig
+            try
             {
-                try
+                var jsonString = System.Text.Json.JsonSerializer.Serialize(defaultConfig, jsonOptions);
+                if (TryWriteConfigWithTimeout(configPath, jsonString, TimeSpan.FromSeconds(10)))
                 {
-                    // 确保配置目录存在
-                    var configDir = Path.GetDirectoryName(configPath);
+                    _logger.LogInformation("Generated default configuration for plugin {PluginName} at {ConfigPath}", plugin.Name, configPath);
+                }
+                else
+                {
+                    _logger.LogError("Timed out while generating default configuration for plugin {PluginName} at {ConfigPath}", plugin.Name, configPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to generate default configuration for plugin {PluginName}", plugin.Name);
+            }
+        }
+        else
+        {
+            // 配置文件已存在，读取并与 DefaultConfig 递归合并缺失的键
+            try
+            {
+                var existingJson = File.ReadAllText(configPath);
+                var existingNode = JsonNode.Parse(existingJson) as JsonObject;
+                var defaultJsonString = System.Text.Json.JsonSerializer.Serialize(defaultConfig);
+                var defaultNode = JsonNode.Parse(defaultJsonString) as JsonObject;
 
-                    if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
-                    {
-                        Directory.CreateDirectory(configDir);
-                    }
+                if (existingNode != null && defaultNode != null)
+                {
+                    MergeMissingKeys(existingNode, defaultNode);
+                    var mergedJson = existingNode.ToJsonString(jsonOptions);
 
-                    // 配置 JSON 序列化选项为缩进格式，便于阅读
-                    var jsonOptions = new System.Text.Json.JsonSerializerOptions
+                    if (TryWriteConfigWithTimeout(configPath, mergedJson, TimeSpan.FromSeconds(10)))
                     {
-                        WriteIndented = true
-                    };
-
-                    // 将默认配置序列化为 JSON 并写入文件
-                    var jsonString = System.Text.Json.JsonSerializer.Serialize(defaultConfig, jsonOptions);
-                    if (TryWriteConfigWithTimeout(configPath, jsonString, TimeSpan.FromSeconds(10)))
-                    {
-                        _logger.LogInformation("Generated default configuration for plugin {PluginName} at {ConfigPath}", plugin.Name, configPath);
+                        _logger.LogInformation("Merged default configuration for plugin {PluginName} at {ConfigPath}", plugin.Name, configPath);
                     }
                     else
                     {
-                        _logger.LogError("Timed out while generating default configuration for plugin {PluginName} at {ConfigPath}", plugin.Name, configPath);
+                        _logger.LogError("Timed out while merging configuration for plugin {PluginName} at {ConfigPath}", plugin.Name, configPath);
                     }
                 }
-                catch (Exception ex)
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to merge configuration for plugin {PluginName}, keeping existing config file unchanged", plugin.Name);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 递归合并默认配置到现有配置中，仅补充缺失的键，不覆盖已有值也不删除多余键。
+    /// </summary>
+    /// <param name="existing">现有配置的 JsonObject</param>
+    /// <param name="defaults">默认配置的 JsonObject</param>
+    private static void MergeMissingKeys(JsonObject existing, JsonObject defaults)
+    {
+        // 构建现有配置键的大小写不敏感查找表
+        // 用于检测 DefaultConfig 中的键在现有配置中是否存在但大小写不同
+        var existingKeyMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in existing)
+        {
+            existingKeyMap[kvp.Key] = kvp.Key;
+        }
+
+        foreach (var kvp in defaults)
+        {
+            if (kvp.Value == null) continue;
+
+            if (existing.ContainsKey(kvp.Key))
+            {
+                // 键存在且大小写完全匹配
+                if (kvp.Value is JsonObject defaultObj && existing[kvp.Key] is JsonObject existingObj)
                 {
-                    _logger.LogError(ex, "Failed to generate default configuration for plugin {PluginName}", plugin.Name);
+                    // 双方都是嵌套对象 → 递归合并
+                    MergeMissingKeys(existingObj, defaultObj);
                 }
+                // 其他情况（值类型、数组、混合类型等）→ 保留现有值，不做任何操作
+            }
+            else if (existingKeyMap.ContainsKey(kvp.Key))
+            {
+                // 存在大小写不同但实质相同的键 → 沿用现有键名
+                var actualKey = existingKeyMap[kvp.Key];
+                if (kvp.Value is JsonObject defaultObj && existing[actualKey] is JsonObject existingObj)
+                {
+                    // 双方都是嵌套对象 → 递归合并到已有的键名下
+                    MergeMissingKeys(existingObj, defaultObj);
+                }
+                // 值类型或类型不一致 → 保留现有值，不做任何操作
+            }
+            else
+            {
+                // 键完全不存在 → 添加（使用 DefaultConfig 中的键名大小写）
+                existing[kvp.Key] = kvp.Value.DeepClone();
             }
         }
     }
@@ -140,7 +217,7 @@ public class PluginServiceRegistrar
     public void AddSwaggerServices(string apiName, string apiVersion)
     {
         _services.AddEndpointsApiExplorer();
-        
+
         _services.AddSwaggerGen(options =>
         {
             options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo

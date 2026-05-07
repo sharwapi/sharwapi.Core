@@ -15,6 +15,17 @@ public class PluginLoader
     private readonly ILogger _logger;
 
     /// <summary>
+    /// 跟踪所有已创建的 AssemblyLoadContext，确保在插件服务注册期间 ALC 保持 alive 状态，
+    /// 防止因失去强引用而被 GC 提前标记为 unloading。
+    /// </summary>
+    private readonly List<PluginLoadContext> _loadContexts = new();
+
+    /// <summary>
+    /// 获取所有已创建的插件加载上下文列表。
+    /// </summary>
+    public IReadOnlyList<PluginLoadContext> LoadContexts => _loadContexts.AsReadOnly();
+
+    /// <summary>
     /// 初始化插件加载器
     /// </summary>
     /// <param name="configuration">应用程序配置</param>
@@ -32,7 +43,7 @@ public class PluginLoader
     public List<IApiPlugin> LoadPlugins()
     {
         var loadedPlugins = new List<IApiPlugin>();
-        
+
         // 获取插件目录路径
         string pluginsPath = Path.Combine(AppContext.BaseDirectory, "plugins");
 
@@ -221,8 +232,13 @@ public class PluginLoader
     {
         // 使用隔离加载上下文加载程序集，防止插件之间的依赖冲突
         var loadContext = new PluginLoadContext(dllPath);
+
+        // 将 ALC 添加到跟踪列表，确保其在服务注册阶段保持 alive，
+        // 不会被 GC 标记为 unloading（isCollectible: true 的 ALC 若无强引用会被回收）
+        _loadContexts.Add(loadContext);
+
         var assembly = loadContext.LoadFromAssemblyPath(dllPath);
-        
+
         // 从程序集中查找所有实现了 IApiPlugin 接口的类型
         var pluginTypes = assembly.GetTypes()
             .Where(t => typeof(IApiPlugin).IsAssignableFrom(t) && !t.IsInterface);
@@ -237,5 +253,25 @@ public class PluginLoader
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 卸载所有插件 AssemblyLoadContext，释放占用的资源。
+    /// 应在完成所有需要 ALC 的操作（如服务注册）后调用。
+    /// </summary>
+    public void UnloadAll()
+    {
+        foreach (var ctx in _loadContexts)
+        {
+            try
+            {
+                ctx.Unload();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to unload plugin assembly load context");
+            }
+        }
+        _loadContexts.Clear();
     }
 }

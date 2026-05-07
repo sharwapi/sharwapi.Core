@@ -30,6 +30,12 @@ public class ApplicationHost
     private string _apiVersion = null!;
 
     /// <summary>
+    /// 插件加载器实例，持有所有插件 AssemblyLoadContext 的强引用，
+    /// 确保在服务注册期间 ALC 不会被 GC 提前标记为 unloading。
+    /// </summary>
+    private PluginLoader _pluginLoader = null!;
+
+    /// <summary>
     /// 初始化应用程序主机
     /// </summary>
     /// <param name="args">命令行参数</param>
@@ -65,8 +71,8 @@ public class ApplicationHost
 
         // 6. 加载插件
         var pluginLogger = new SerilogLoggerFactory(Log.Logger).CreateLogger("PluginLoader");
-        var pluginLoader = new PluginLoader(_configuration, pluginLogger);
-        var plugins = pluginLoader.LoadPlugins();
+        _pluginLoader = new PluginLoader(_configuration, pluginLogger);
+        var plugins = _pluginLoader.LoadPlugins();
 
         // 7. 检查依赖
         var dependencyChecker = new PluginDependencyChecker(pluginLogger);
@@ -75,7 +81,7 @@ public class ApplicationHost
         // 8. 注册服务
         // 将插件集合注入到 DI 容器（作为单例），插件实现可从容器中获取此集合
         builder.Services.AddSingleton(plugins);
-        
+
         var serviceRegistrar = new PluginServiceRegistrar(builder.Services, pluginLogger);
         serviceRegistrar.AddSwaggerServices(_apiName, _apiVersion);
         serviceRegistrar.RegisterPluginServices(plugins, _configuration);
