@@ -433,3 +433,5 @@ FodyWeavers.xsd
 appsettings.Development.json
 
 !Properties/PublishProfiles/*.pubxml
+
+publish/
